@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <lvgl.h>
 #include <Preferences.h>
 #include <math.h>
 
@@ -9,8 +10,6 @@
 #include <BLEAdvertisedDevice.h>
 #include <BLEClient.h>
 
-#include <lvgl.h>
-
 #include "Arduino_GFX_Library.h"
 #include "pin_config.h"
 #include "TouchDrv.hpp"
@@ -19,7 +18,7 @@
 #define BLUELINE_HAS_XPOWERS 1
 
 // =====================================================
-// BlueLine One LVGL Clean v134
+// BlueLine One LVGL Clean v42 BLE Scan Positions Match Main
 // =====================================================
 // Updates:
 // - Battery icon white dashboard style
@@ -146,7 +145,6 @@ const unsigned long TOUCH_RELEASE_GRACE = 180;
 #define LONG_TARGET_UNIT  3
 #define LONG_TARGET_COOLANT_UNIT 4
 #define LONG_TARGET_INTAKE_AIR_UNIT 5
-#define LONG_TARGET_OIL_UNIT 6
 #define LONG_TARGET_MPG_RESET 7
 #define LONG_TARGET_TPMS_UNIT 8
 
@@ -183,7 +181,6 @@ const int SHIFT_RPM_HOLD_STEP = 250;
 #define SCREEN_MPG            7
 #define SCREEN_CHRONO         8
 #define SCREEN_TPMS           9
-#define SCREEN_OIL_TEMP       10  // parked for future use; not in normal swipe rotation
 #define SCREEN_BLE_MENU       11
 #define SCREEN_SHIFT_SETTINGS 12
 
@@ -217,7 +214,6 @@ int airflowRingColor = RING_CYAN;
 int mpgRingColor = RING_CYAN;
 int chronoRingColor = RING_BLUE;
 int tpmsRingColor = RING_CYAN;
-int oilTempRingColor = RING_CYAN;
 
 // =====================================================
 // Live OBD Values
@@ -247,8 +243,6 @@ bool hasLiveIntakeAirTemp = false;
 float liveMafGps = 0.0;
 bool hasLiveMaf = false;
 
-int liveOilTempC = 0;
-bool hasLiveOilTemp = false;
 
 // =====================================================
 // TPMS Values
@@ -389,7 +383,6 @@ const unsigned long RPM_TURBO_TIMEOUT = 55;
 #define OBD_POLL_THROTTLE 4
 #define OBD_POLL_INTAKE_AIR 5
 #define OBD_POLL_AIRFLOW    6
-#define OBD_POLL_OIL_TEMP   7
 
 int obdPollStep = OBD_POLL_VOLTAGE;
 int mpgPollStep = 0; // 0 = speed, 1 = MAF for Average MPG screen
@@ -429,7 +422,6 @@ int speedUnitMode = SPEED_UNIT_MPH;
 
 int coolantUnitMode = TEMP_UNIT_F;
 int intakeAirUnitMode = TEMP_UNIT_F;
-int oilTempUnitMode = TEMP_UNIT_F;
 
 // =====================================================
 // Brightness Settings
@@ -486,7 +478,6 @@ void showAirflowGauge();
 void showMpgGauge();
 void showChronographGauge();
 void showTpmsGauge();
-void showOilTempGauge();
 void showBleMenu();
 void showShiftSettings();
 
@@ -529,7 +520,6 @@ void saveRingSettings();
 void saveSpeedSettings();
 void saveCoolantUnitSettings();
 void saveIntakeAirUnitSettings();
-void saveOilTempUnitSettings();
 void saveTpmsUnitSettings();
 void loadShiftLightSettings();
 void saveShiftLightSettings();
@@ -551,7 +541,6 @@ void drawTpmsTire(int x, int y, const char *cornerLabel, float psi, bool hasData
 uint32_t getTpmsColor(float psi, bool hasData);
 uint32_t getTpmsStatusLineColor(float psi, bool hasData);
 void saveTpmsUnitSettings();
-void drawOilTempIcon(uint32_t iconColor);
 void drawThrottleSegments(int percent, bool hasData, uint32_t activeColor);
 void drawBootAnimation();
 void showBootReconnectStatus(const char *statusText, uint32_t statusColor);
@@ -661,7 +650,6 @@ void parseCoolantTemp(const String &response);
 void parseThrottlePosition(const String &response);
 void parseIntakeAirTemp(const String &response);
 void parseMafAirflow(const String &response);
-void parseOilTemp(const String &response);
 void pollTpmsDebug();
 int hexByteToInt(const String &token);
 
@@ -1133,8 +1121,7 @@ void openBleMenu()
       currentScreen == SCREEN_AIRFLOW ||
       currentScreen == SCREEN_MPG ||
       currentScreen == SCREEN_CHRONO ||
-      currentScreen == SCREEN_TPMS ||
-      currentScreen == SCREEN_OIL_TEMP)
+      currentScreen == SCREEN_TPMS)
   {
     lastGaugeScreen = currentScreen;
   }
@@ -1155,8 +1142,7 @@ void goBackToLastGauge()
       lastGaugeScreen != SCREEN_AIRFLOW &&
       lastGaugeScreen != SCREEN_MPG &&
       lastGaugeScreen != SCREEN_CHRONO &&
-      lastGaugeScreen != SCREEN_TPMS &&
-      lastGaugeScreen != SCREEN_OIL_TEMP)
+      lastGaugeScreen != SCREEN_TPMS)
   {
     lastGaugeScreen = SCREEN_BATTERY;
   }
@@ -1339,11 +1325,6 @@ int getCurrentRingColor()
     return tpmsRingColor;
   }
 
-  if (currentScreen == SCREEN_OIL_TEMP)
-  {
-    return oilTempRingColor;
-  }
-
   if (currentScreen == SCREEN_BLE_MENU)
   {
     if (lastGaugeScreen == SCREEN_ALL_IN_ONE)
@@ -1394,11 +1375,6 @@ int getCurrentRingColor()
     if (lastGaugeScreen == SCREEN_TPMS)
     {
       return tpmsRingColor;
-    }
-
-    if (lastGaugeScreen == SCREEN_OIL_TEMP)
-    {
-      return oilTempRingColor;
     }
 
     return batteryRingColor;
@@ -1455,10 +1431,6 @@ void setCurrentRingColor(int colorMode)
   {
     tpmsRingColor = colorMode;
   }
-  else if (currentScreen == SCREEN_OIL_TEMP)
-  {
-    oilTempRingColor = colorMode;
-  }
   else if (currentScreen == SCREEN_BLE_MENU)
   {
     if (lastGaugeScreen == SCREEN_ALL_IN_ONE)
@@ -1500,10 +1472,6 @@ void setCurrentRingColor(int colorMode)
     else if (lastGaugeScreen == SCREEN_TPMS)
     {
       tpmsRingColor = colorMode;
-    }
-    else if (lastGaugeScreen == SCREEN_OIL_TEMP)
-    {
-      oilTempRingColor = colorMode;
     }
     else
     {
@@ -3146,154 +3114,6 @@ void showTpmsGauge()
   drawBluetoothIcon();
 }
 
-uint32_t getOilTempColor(int oilTempF, bool hasData)
-{
-  if (!hasData)
-  {
-    return 0x666666;
-  }
-
-  if (oilTempF < 160)
-  {
-    return 0x0095FF;
-  }
-
-  if (oilTempF <= 230)
-  {
-    return 0x00FF80;
-  }
-
-  if (oilTempF <= 260)
-  {
-    return 0xFFFF00;
-  }
-
-  return 0xFF0000;
-}
-
-void styleOilTempIconPart(lv_obj_t *obj, uint32_t color)
-{
-  lv_obj_set_style_bg_color(obj, lv_color_hex(color), LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
-  lv_obj_set_style_outline_width(obj, 0, LV_PART_MAIN);
-  lv_obj_set_style_pad_all(obj, 0, LV_PART_MAIN);
-  lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-}
-
-void drawOilTempIcon(uint32_t iconColor)
-{
-  // Oil temperature symbol styled closer to the reference:
-  // no outer circle, simple thermometer, and smoother wave lines.
-  const int iconX = 0;
-  const int iconY = 86;
-
-  // Soft glow behind the symbol
-  createDot(contentLayer, iconX, iconY, 110, iconColor, LV_OPA_10);
-
-  // Thermometer stem
-  lv_obj_t *stem = lv_obj_create(contentLayer);
-  lv_obj_set_size(stem, 18, 62);
-  lv_obj_align(stem, LV_ALIGN_CENTER, iconX - 8, iconY - 18);
-  lv_obj_set_style_radius(stem, 9, LV_PART_MAIN);
-  styleOilTempIconPart(stem, iconColor);
-
-  // Thermometer bulb
-  lv_obj_t *bulb = lv_obj_create(contentLayer);
-  lv_obj_set_size(bulb, 30, 30);
-  lv_obj_align(bulb, LV_ALIGN_CENTER, iconX - 8, iconY + 22);
-  lv_obj_set_style_radius(bulb, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-  styleOilTempIconPart(bulb, iconColor);
-
-  // Temperature tick marks on the right side of the thermometer
-  createSolidRect(contentLayer, 26, 7, iconX + 18, iconY - 35, iconColor, LV_OPA_COVER, 4);
-  createSolidRect(contentLayer, 22, 7, iconX + 16, iconY - 18, iconColor, LV_OPA_COVER, 4);
-  createSolidRect(contentLayer, 26, 7, iconX + 18, iconY - 1,  iconColor, LV_OPA_COVER, 4);
-
-  // Smoother, less-squiggly wave lines
-  static lv_point_precise_t smallWavePts[] = {
-    {0, 4}, {10, 1}, {20, 4}, {30, 1}, {40, 4}
-  };
-
-  static lv_point_precise_t bottomWavePts[] = {
-    {0, 5}, {10, 2}, {20, 5}, {30, 2}, {40, 5},
-    {50, 2}, {60, 5}, {70, 2}, {80, 5}
-  };
-
-  // Left small wave
-  lv_obj_t *leftWave = lv_line_create(contentLayer);
-  lv_line_set_points(leftWave, smallWavePts, sizeof(smallWavePts) / sizeof(smallWavePts[0]));
-  lv_obj_set_size(leftWave, 40, 8);
-  lv_obj_align(leftWave, LV_ALIGN_CENTER, iconX - 38, iconY + 23);
-  lv_obj_set_style_line_color(leftWave, lv_color_hex(iconColor), LV_PART_MAIN);
-  lv_obj_set_style_line_width(leftWave, 6, LV_PART_MAIN);
-  lv_obj_set_style_line_rounded(leftWave, true, LV_PART_MAIN);
-
-  // Right small wave
-  lv_obj_t *rightWave = lv_line_create(contentLayer);
-  lv_line_set_points(rightWave, smallWavePts, sizeof(smallWavePts) / sizeof(smallWavePts[0]));
-  lv_obj_set_size(rightWave, 40, 8);
-  lv_obj_align(rightWave, LV_ALIGN_CENTER, iconX + 34, iconY + 23);
-  lv_obj_set_style_line_color(rightWave, lv_color_hex(iconColor), LV_PART_MAIN);
-  lv_obj_set_style_line_width(rightWave, 6, LV_PART_MAIN);
-  lv_obj_set_style_line_rounded(rightWave, true, LV_PART_MAIN);
-
-  // Bottom wave
-  lv_obj_t *bottomWave = lv_line_create(contentLayer);
-  lv_line_set_points(bottomWave, bottomWavePts, sizeof(bottomWavePts) / sizeof(bottomWavePts[0]));
-  lv_obj_set_size(bottomWave, 80, 10);
-  lv_obj_align(bottomWave, LV_ALIGN_CENTER, iconX, iconY + 47);
-  lv_obj_set_style_line_color(bottomWave, lv_color_hex(iconColor), LV_PART_MAIN);
-  lv_obj_set_style_line_width(bottomWave, 6, LV_PART_MAIN);
-  lv_obj_set_style_line_rounded(bottomWave, true, LV_PART_MAIN);
-}
-
-void showOilTempGauge()
-{
-  clearLayer(contentLayer);
-
-  int mode = getCurrentRingColor();
-  uint32_t highlight = getRingHighlightColor(mode);
-
-  createLabel(contentLayer, "OIL TEMP", &Xolonium_pn4D32pt7b, highlight, 0, -120);
-
-  int oilTempF = 0;
-  int shownTemp = 0;
-  const char *degreeSymbol = "\xC2\xB0";
-  const char *unitText = oilTempUnitMode == TEMP_UNIT_C ? "C" : "F";
-
-  if (hasLiveOilTemp)
-  {
-    oilTempF = (int)((liveOilTempC * 9.0 / 5.0) + 32.0 + 0.5);
-
-    if (oilTempUnitMode == TEMP_UNIT_C)
-    {
-      shownTemp = liveOilTempC;
-    }
-    else
-    {
-      shownTemp = oilTempF;
-    }
-  }
-
-  uint32_t oilColor = getOilTempColor(oilTempF, hasLiveOilTemp);
-
-  char oilText[20];
-
-  if (hasLiveOilTemp)
-  {
-    snprintf(oilText, sizeof(oilText), "%d%s%s", shownTemp, degreeSymbol, unitText);
-  }
-  else
-  {
-    snprintf(oilText, sizeof(oilText), "---%s%s", degreeSymbol, unitText);
-  }
-
-  createLabel(contentLayer, oilText, &Xolonium_pn4D72pt7b, oilColor, 0, -40);
-  drawOilTempIcon(oilColor);
-  drawBluetoothIcon();
-}
-
 // =====================================================
 // Menu Screens
 // =====================================================
@@ -3322,8 +3142,6 @@ void clearLiveData()
   liveMafGps = 0.0;
   hasLiveMaf = false;
 
-  liveOilTempC = 0;
-  hasLiveOilTemp = false;
 }
 
 // =====================================================
@@ -3369,8 +3187,7 @@ bool isGaugeScreen()
          currentScreen == SCREEN_AIRFLOW ||
          currentScreen == SCREEN_MPG ||
          currentScreen == SCREEN_CHRONO ||
-         currentScreen == SCREEN_TPMS ||
-         currentScreen == SCREEN_OIL_TEMP;
+         currentScreen == SCREEN_TPMS;
 }
 
 void cycleBrightness()
@@ -3777,7 +3594,7 @@ bool connectToBleResult(int index, int failReturnState)
   forceLvglRefresh();
   delay(700);
 
-  if (lastGaugeScreen != SCREEN_ALL_IN_ONE && lastGaugeScreen != SCREEN_BATTERY && lastGaugeScreen != SCREEN_RPM && lastGaugeScreen != SCREEN_SPEED && lastGaugeScreen != SCREEN_COOLANT && lastGaugeScreen != SCREEN_THROTTLE && lastGaugeScreen != SCREEN_INTAKE_AIR && lastGaugeScreen != SCREEN_AIRFLOW && lastGaugeScreen != SCREEN_MPG && lastGaugeScreen != SCREEN_CHRONO && lastGaugeScreen != SCREEN_TPMS && lastGaugeScreen != SCREEN_OIL_TEMP)
+  if (lastGaugeScreen != SCREEN_ALL_IN_ONE && lastGaugeScreen != SCREEN_BATTERY && lastGaugeScreen != SCREEN_RPM && lastGaugeScreen != SCREEN_SPEED && lastGaugeScreen != SCREEN_COOLANT && lastGaugeScreen != SCREEN_THROTTLE && lastGaugeScreen != SCREEN_INTAKE_AIR && lastGaugeScreen != SCREEN_AIRFLOW && lastGaugeScreen != SCREEN_MPG && lastGaugeScreen != SCREEN_CHRONO && lastGaugeScreen != SCREEN_TPMS)
   {
     lastGaugeScreen = SCREEN_ALL_IN_ONE;
   }
@@ -3929,7 +3746,6 @@ bool connectToSavedBleQuiet()
        currentScreen == SCREEN_INTAKE_AIR ||
        currentScreen == SCREEN_AIRFLOW ||
        currentScreen == SCREEN_MPG ||
-       currentScreen == SCREEN_OIL_TEMP ||
        currentScreen == SCREEN_BLE_MENU))
   {
     redrawUI();
@@ -4435,38 +4251,6 @@ void parseMafAirflow(const String &response)
   }
 }
 
-void parseOilTemp(const String &response)
-{
-  String clean = response;
-  clean.toUpperCase();
-  clean.replace("\r", " ");
-  clean.replace("\n", " ");
-  clean.replace(">", " ");
-  clean.replace(" ", "");
-
-  int idx = clean.indexOf("415C");
-
-  if (idx < 0 || clean.length() < idx + 6)
-  {
-    hasLiveOilTemp = false;
-    return;
-  }
-
-  String aText = clean.substring(idx + 4, idx + 6);
-  int A = hexByteToInt(aText);
-  int oilTempC = A - 40;
-
-  if (oilTempC >= -40 && oilTempC <= 215)
-  {
-    liveOilTempC = oilTempC;
-    hasLiveOilTemp = true;
-  }
-  else
-  {
-    hasLiveOilTemp = false;
-  }
-}
-
 void parseObdResponse(const String &command, const String &response)
 {
   if (response.length() == 0)
@@ -4478,7 +4262,6 @@ void parseObdResponse(const String &command, const String &response)
     if (command == "0111") hasLiveThrottle = false;
     if (command == "010F") hasLiveIntakeAirTemp = false;
     if (command == "0110") hasLiveMaf = false;
-    if (command == "015C") hasLiveOilTemp = false;
     return;
   }
 
@@ -4514,10 +4297,6 @@ void parseObdResponse(const String &command, const String &response)
   {
     parseMafAirflow(response);
   }
-  else if (command == "015C")
-  {
-    parseOilTemp(response);
-  }
 }
 
 String getCurrentGaugeObdCommand()
@@ -4550,7 +4329,6 @@ String getCurrentGaugeObdCommand()
   {
     return chronoPollStep == 0 ? "010D" : "0110";
   }
-  if (currentScreen == SCREEN_OIL_TEMP) return "015C";
 
   return "";
 }
@@ -4815,7 +4593,6 @@ void showBleMenu()
 }
 
 
-
 void showShiftSettings()
 {
   clearLayer(contentLayer);
@@ -4982,10 +4759,6 @@ void drawCurrentScreen()
 
     case SCREEN_TPMS:
       showTpmsGauge();
-      break;
-
-    case SCREEN_OIL_TEMP:
-      showOilTempGauge();
       break;
 
     case SCREEN_BLE_MENU:
@@ -5186,11 +4959,9 @@ void loadSettings()
   mpgRingColor = prefs.getInt("mpgRing", RING_CYAN);
   chronoRingColor = prefs.getInt("chronoRing", RING_BLUE);
   tpmsRingColor = prefs.getInt("tpmsRing", RING_CYAN);
-  oilTempRingColor = prefs.getInt("oilRing", RING_CYAN);
   speedUnitMode = prefs.getInt("speedUnit", SPEED_UNIT_MPH);
   coolantUnitMode = prefs.getInt("coolantUnit", TEMP_UNIT_F);
   intakeAirUnitMode = prefs.getInt("intakeUnit", TEMP_UNIT_F);
-  oilTempUnitMode = prefs.getInt("oilUnit", TEMP_UNIT_F);
   tpmsUnitMode = prefs.getInt("tpmsUnit", TPMS_UNIT_PSI);
   brightnessMode = prefs.getInt("brightness", BRIGHTNESS_BRIGHT);
   connectedBleName = prefs.getString("bleName", "");
@@ -5224,7 +4995,6 @@ void loadSettings()
   mpgRingColor = wrapRingColor(mpgRingColor);
   chronoRingColor = wrapRingColor(chronoRingColor);
   tpmsRingColor = wrapRingColor(tpmsRingColor);
-  oilTempRingColor = wrapRingColor(oilTempRingColor);
 
   if (tpmsUnitMode != TPMS_UNIT_PSI && tpmsUnitMode != TPMS_UNIT_KPA)
   {
@@ -5244,11 +5014,6 @@ void loadSettings()
   if (intakeAirUnitMode != TEMP_UNIT_F && intakeAirUnitMode != TEMP_UNIT_C)
   {
     intakeAirUnitMode = TEMP_UNIT_F;
-  }
-
-  if (oilTempUnitMode != TEMP_UNIT_F && oilTempUnitMode != TEMP_UNIT_C)
-  {
-    oilTempUnitMode = TEMP_UNIT_F;
   }
 
   if (brightnessMode < BRIGHTNESS_DIM || brightnessMode > BRIGHTNESS_BRIGHT)
@@ -5279,7 +5044,6 @@ void saveRingSettings()
   prefs.putInt("mpgRing", mpgRingColor);
   prefs.putInt("chronoRing", chronoRingColor);
   prefs.putInt("tpmsRing", tpmsRingColor);
-  prefs.putInt("oilRing", oilTempRingColor);
 
   prefs.end();
 }
@@ -5302,13 +5066,6 @@ void saveIntakeAirUnitSettings()
 {
   prefs.begin("blueline", false);
   prefs.putInt("intakeUnit", intakeAirUnitMode);
-  prefs.end();
-}
-
-void saveOilTempUnitSettings()
-{
-  prefs.begin("blueline", false);
-  prefs.putInt("oilUnit", oilTempUnitMode);
   prefs.end();
 }
 
@@ -5491,15 +5248,6 @@ int getLongPressTargetFromStart(int x, int y)
     }
   }
 
-  if (currentScreen == SCREEN_OIL_TEMP)
-  {
-    if (isInRect(x, y, 80, 145, 306, 145))
-    {
-      Serial.println("Long press target = OIL TEMP UNIT");
-      return LONG_TARGET_OIL_UNIT;
-    }
-  }
-
   if (currentScreen == SCREEN_MPG)
   {
     if (isInRect(x, y, 80, 145, 306, 145))
@@ -5528,8 +5276,7 @@ int getLongPressTargetFromStart(int x, int y)
       currentScreen == SCREEN_AIRFLOW ||
       currentScreen == SCREEN_MPG ||
       currentScreen == SCREEN_CHRONO ||
-      currentScreen == SCREEN_TPMS ||
-      currentScreen == SCREEN_OIL_TEMP)
+      currentScreen == SCREEN_TPMS)
   {
     if (isInRect(x, y, 110, 315, 246, 151))
     {
@@ -5586,16 +5333,6 @@ void triggerLongPressTarget()
 
     intakeAirUnitMode = intakeAirUnitMode == TEMP_UNIT_F ? TEMP_UNIT_C : TEMP_UNIT_F;
     saveIntakeAirUnitSettings();
-    redrawUI();
-    return;
-  }
-
-  if (longPressTarget == LONG_TARGET_OIL_UNIT)
-  {
-    Serial.println("Oil temp unit long press triggered");
-
-    oilTempUnitMode = oilTempUnitMode == TEMP_UNIT_F ? TEMP_UNIT_C : TEMP_UNIT_F;
-    saveOilTempUnitSettings();
     redrawUI();
     return;
   }
@@ -5894,7 +5631,7 @@ void handleSwipe(int dx, int dy, unsigned long duration)
         currentScreen == SCREEN_MPG ||
         currentScreen == SCREEN_CHRONO ||
         currentScreen == SCREEN_TPMS ||
-        currentScreen == SCREEN_OIL_TEMP)
+        currentScreen == SCREEN_TPMS)
     {
       if (dx < 0)
       {
