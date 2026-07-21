@@ -8,9 +8,9 @@ BlueLine One is a custom ESP32-S3 round AMOLED CAN bus gauge. It displays live O
 
 ## Preview
 
-```markdown
+
 ![BlueLine One All-In-One Gauge](assets/IMG_2850.jpeg)
-```
+
 
 ---
 
